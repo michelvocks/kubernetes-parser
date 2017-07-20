@@ -85,9 +85,9 @@ func getExpiredNS(clientset *kubernetes.Clientset) {
 			}
 		}
 
-		if expiresFieldValue != "" && createdTimeFound {
+		if expiresFieldValue != "" && createdTimeFound && expiresFieldValue != "none"  {
 			expiredTime := calculateExpireDate(createdTime, expiresFieldValue)
-			if time.Now().Local().After(expiredTime) && expiresFieldValue != "none" {
+			if time.Now().Local().After(expiredTime) {
 				expiredNamespace.Name = nsObj.ObjectMeta.Name
 				expiredNamespace.ExpiredTime = expiredTime.String()
 				expiredNamespace.CurrentTime = time.Now().Local().String()
