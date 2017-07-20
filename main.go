@@ -18,9 +18,11 @@ const expiresField string = "expires"
 const createdLayout string = "20060102150405"
 
 type nameSpaceExpired struct {
-	Name        string
-	ExpiredTime string
-	CurrentTime string
+	Name          string
+	ExpiredTime   string
+	CurrentTime   string
+	GivenTime     string
+	GivenTimeConv string
 }
 
 func main() {
@@ -63,6 +65,9 @@ func getExpiredNS(clientset *kubernetes.Clientset) {
 
 		// iterate annotations
 		var createdTime time.Time
+		var createdTimeFound bool = false
+		var expiresFieldValue string
+		var expiredNamespace nameSpaceExpired = nameSpaceExpired{}
 		for id, anno := range nsAnno {
 			// did we found the created and expires tag?
 			switch id {
@@ -70,17 +75,24 @@ func getExpiredNS(clientset *kubernetes.Clientset) {
 				t, err := time.ParseInLocation(createdLayout, anno, time.Local)
 				if err != nil {
 					fmt.Println(err)
+				} else {
+					expiredNamespace.GivenTime = anno
+					createdTime = t
+					createdTimeFound = true
 				}
-				createdTime = t
 			case expiresField:
-				expiredTime := calculateExpireDate(createdTime, anno)
-				if time.Now().Local().After(expiredTime) {
-					expiredNamespace := new(nameSpaceExpired)
-					expiredNamespace.Name = nsObj.ObjectMeta.Name
-					expiredNamespace.ExpiredTime = expiredTime.String()
-					expiredNamespace.CurrentTime = time.Now().Local().String()
-					expiredNamespaces = append(expiredNamespaces, expiredNamespace)
-				}
+				expiresFieldValue = anno
+			}
+		}
+
+		if expiresFieldValue != "" && createdTimeFound {
+			expiredTime := calculateExpireDate(createdTime, expiresFieldValue)
+			if time.Now().Local().After(expiredTime) && expiresFieldValue != "none" {
+				expiredNamespace.Name = nsObj.ObjectMeta.Name
+				expiredNamespace.ExpiredTime = expiredTime.String()
+				expiredNamespace.CurrentTime = time.Now().Local().String()
+				expiredNamespace.GivenTimeConv = createdTime.String()
+				expiredNamespaces = append(expiredNamespaces, &expiredNamespace)
 			}
 		}
 	}
@@ -94,11 +106,6 @@ func getExpiredNS(clientset *kubernetes.Clientset) {
 }
 
 func calculateExpireDate(t time.Time, addTime string) time.Time {
-	// if none is set, the ns will never expire
-	if addTime == "none" {
-		return t.AddDate(100, 0, 0)
-	}
-
 	// get the value of time (e.g. 12)
 	i, err := strconv.Atoi(addTime[0 : len(addTime)-1])
 	if err != nil {
