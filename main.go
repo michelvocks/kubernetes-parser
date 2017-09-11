@@ -1,33 +1,38 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
-	"fmt"
-	"strconv"
 	"strings"
-	"time"
 
 	"k8s.io/client-go/kubernetes"
-	v1 "k8s.io/client-go/pkg/api/v1"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-const createdField string = "created"
-const expiresField string = "expires"
-const createdLayout string = "20060102150405"
-
-type nameSpaceExpired struct {
-	Name          string
-	ExpiredTime   string
-	CurrentTime   string
-	GivenTime     string
-	GivenTimeConv string
+type command interface {
+	execute()
 }
+
+type expiredNSArgs struct {
+	clientset *kubernetes.Clientset
+}
+
+type scaledownRSArgs struct {
+	ns        string
+	clientset *kubernetes.Clientset
+}
+
+type scaleupRSArgs struct {
+	ns        string
+	clientset *kubernetes.Clientset
+}
+
+const latestRS string = "latestRS"
 
 func main() {
 	kubeconfig := flag.String("kubeconfig", "", "absolute path to the kubeconfig file")
-	command := flag.Bool("get-expired-ns", false, "return all expired namespaces in json format")
+	command := flag.String("cmd", "", "command to execute: expiredns, scaledownrs, scaleuprs")
+	namespace := flag.String("namespace", "", "namespace for replication controller scale down / up")
+
 	flag.Parse()
 	if *kubeconfig == "" {
 		panic("-kubeconfig not specified")
@@ -43,97 +48,17 @@ func main() {
 		panic(err)
 	}
 
-	// return expired namespaces
-	if *command {
-		getExpiredNS(clientset)
+	// Setup command pattern
+	expiredNS := expiredNSArgs{clientset: clientset}
+	scaledownRS := scaledownRSArgs{ns: *namespace, clientset: clientset}
+	scaleupRS := scaleupRSArgs{ns: *namespace, clientset: clientset}
+
+	switch strings.ToLower(*command) {
+	case "expiredns":
+		expiredNS.execute()
+	case "scaledownrs":
+		scaledownRS.execute()
+	case "scaleuprs":
+		scaleupRS.execute()
 	}
-}
-
-func getExpiredNS(clientset *kubernetes.Clientset) {
-	// get namespaces
-	ns := clientset.CoreV1Client.Namespaces()
-	nsList, err := ns.List(v1.ListOptions{})
-	if err != nil {
-		panic(err)
-	}
-
-	// iterate over all namespaces and get the annotatios
-	expiredNamespaces := []*nameSpaceExpired{}
-	for _, nsObj := range nsList.Items {
-		// get annotations from namespace
-		nsAnno := nsObj.Annotations
-
-		// iterate annotations
-		var createdTime time.Time
-		var createdTimeFound bool = false
-		var expiresFieldValue string
-		var expiredNamespace nameSpaceExpired = nameSpaceExpired{}
-		for id, anno := range nsAnno {
-			// did we found the created and expires tag?
-			switch id {
-			case createdField:
-				t, err := time.ParseInLocation(createdLayout, anno, time.Local)
-				if err != nil {
-					fmt.Println(err)
-				} else {
-					expiredNamespace.GivenTime = anno
-					createdTime = t
-					createdTimeFound = true
-				}
-			case expiresField:
-				expiresFieldValue = anno
-			}
-		}
-
-		if expiresFieldValue != "" && createdTimeFound && expiresFieldValue != "none"  {
-			expiredTime := calculateExpireDate(createdTime, expiresFieldValue)
-			if time.Now().Local().After(expiredTime) {
-				expiredNamespace.Name = nsObj.ObjectMeta.Name
-				expiredNamespace.ExpiredTime = expiredTime.String()
-				expiredNamespace.CurrentTime = time.Now().Local().String()
-				expiredNamespace.GivenTimeConv = createdTime.String()
-				expiredNamespaces = append(expiredNamespaces, &expiredNamespace)
-			}
-		}
-	}
-
-	// print out all expired namespaces as json
-	b, err := json.Marshal(expiredNamespaces)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(string(b))
-}
-
-func calculateExpireDate(t time.Time, addTime string) time.Time {
-	// get the value of time (e.g. 12)
-	i, err := strconv.Atoi(addTime[0 : len(addTime)-1])
-	if err != nil {
-		fmt.Println(err)
-		return t
-	}
-
-	// get the time type (e.g. d for days)
-	givenType := strings.ToLower(addTime[len(addTime)-1:])
-
-	// find out the type
-	var timeType time.Duration
-	switch givenType {
-	case "s":
-		timeType = time.Second
-	case "m":
-		timeType = time.Minute
-	case "h":
-		timeType = time.Hour
-	case "d":
-		return t.AddDate(0, 0, i)
-	case "w":
-		return t.AddDate(0, 0, i*7)
-	default:
-		return t
-	}
-
-	// calculate new expired time
-	t = t.Add(timeType * time.Duration(i))
-	return t
 }
