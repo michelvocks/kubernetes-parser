@@ -1,7 +1,10 @@
 {
-	"ImportPath": "github.com/michelvocks/kubernetes-parser",
+	"ImportPath": "github.com/michelvocks/kubernetes-toolbox",
 	"GoVersion": "go1.7",
 	"GodepVersion": "v79",
+	"Packages": [
+		"./..."
+	],
 	"Deps": [
 		{
 			"ImportPath": "cloud.google.com/go/compute/metadata",
