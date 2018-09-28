@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -12,23 +13,24 @@ import (
 )
 
 const createdField string = "created"
-const expiresField string = "expires"
 const createdLayout string = "20060102150405"
 
 type nameSpaceExpired struct {
-	Name          string
-	ExpiredTime   string
-	CurrentTime   string
-	GivenTime     string
-	GivenTimeConv string
+	Name              string
+	ExpiredTime       string
+	CurrentTime       string
+	GivenTime         string
+	GivenTimeConv     string
+	MinutesTillExpire int
+	UserID            string
 }
 
 func (args expiredNSArgs) execute() {
 	// run command
-	getExpiredNS(args.clientset)
+	getExpiredNS(args.clientset, args.expiredTime)
 }
 
-func getExpiredNS(clientset *kubernetes.Clientset) {
+func getExpiredNS(clientset *kubernetes.Clientset, expireTime time.Duration) {
 	// get namespaces
 	ns := clientset.CoreV1Client.Namespaces()
 	nsList, err := ns.List(v1.ListOptions{})
@@ -44,9 +46,10 @@ func getExpiredNS(clientset *kubernetes.Clientset) {
 
 		// iterate annotations
 		var createdTime time.Time
-		var createdTimeFound bool = false
+		var createdTimeFound = false
 		var expiresFieldValue string
-		var expiredNamespace nameSpaceExpired = nameSpaceExpired{}
+		var userID string
+		var expiredNamespace = nameSpaceExpired{}
 		for id, anno := range nsAnno {
 			// did we found the created and expires tag?
 			switch id {
@@ -61,16 +64,21 @@ func getExpiredNS(clientset *kubernetes.Clientset) {
 				}
 			case expiresField:
 				expiresFieldValue = anno
+			case userIdField:
+				userID = anno
 			}
 		}
 
 		if expiresFieldValue != "" && createdTimeFound && expiresFieldValue != "none" {
 			expiredTime := calculateExpireDate(createdTime, expiresFieldValue)
+			expiredTime = expiredTime.Add((-1 * expireTime) * time.Minute)
 			if time.Now().Local().After(expiredTime) {
 				expiredNamespace.Name = nsObj.ObjectMeta.Name
 				expiredNamespace.ExpiredTime = expiredTime.String()
 				expiredNamespace.CurrentTime = time.Now().Local().String()
 				expiredNamespace.GivenTimeConv = createdTime.String()
+				expiredNamespace.MinutesTillExpire = int(math.Abs(time.Since(expiredTime).Minutes()))
+				expiredNamespace.UserID = userID
 				expiredNamespaces = append(expiredNamespaces, &expiredNamespace)
 			}
 		}
